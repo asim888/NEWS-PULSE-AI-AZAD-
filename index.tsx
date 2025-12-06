@@ -21,9 +21,12 @@ interface ErrorBoundaryState {
 // Error Boundary Component
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   public state: ErrorBoundaryState;
+  // Explicitly define props to avoid TS error "Property 'props' does not exist on type 'ErrorBoundary'"
+  public props: Readonly<ErrorBoundaryProps>;
 
   constructor(props: ErrorBoundaryProps) {
     super(props);
+    this.props = props;
     this.state = { hasError: false, error: null };
   }
 
