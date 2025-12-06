@@ -1,17 +1,17 @@
-
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { EnhancedArticleContent } from "../types";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
-import { getEnv } from "../utils/env";
 
 // In a real app, this would be environment variable. 
 let ai: GoogleGenAI | null = null;
 
 const getAI = () => {
   if (!ai) {
-    const key = getEnv('API_KEY');
-    if (key) {
-        ai = new GoogleGenAI({ apiKey: key });
+    // Guidelines strict requirement: Use process.env.API_KEY directly.
+    if (process.env.API_KEY) {
+        ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    } else {
+        console.error("API_KEY is missing in process.env");
     }
   }
   return ai;
