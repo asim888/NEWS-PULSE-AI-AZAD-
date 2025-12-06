@@ -2,14 +2,16 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { EnhancedArticleContent } from "../types";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
+import { getEnv } from "../utils/env";
 
 // In a real app, this would be environment variable. 
 let ai: GoogleGenAI | null = null;
 
 const getAI = () => {
   if (!ai) {
-    if (process.env.API_KEY) {
-        ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const key = getEnv('API_KEY');
+    if (key) {
+        ai = new GoogleGenAI({ apiKey: key });
     }
   }
   return ai;

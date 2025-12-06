@@ -4,6 +4,7 @@ import { Category, Article, TeamMember, UserState, EnhancedArticleContent, Subsc
 import { APP_NAME, TAGLINE, ATTRIBUTION, FALLBACK_NEWS, LOGO_URL, TEAM, ASSET_LOGO_URL, SUBSCRIPTION_QR_URL } from './constants';
 import * as GeminiService from './services/geminiService';
 import * as RssService from './services/rssService';
+import { getEnv } from './utils/env';
 
 // Icons
 const IconCrown = () => (
@@ -124,16 +125,16 @@ const InteractiveBackground = () => {
       ball.y += (mouse.y - ball.y) * 0.15;
 
       // Add new particles (Fire trail emission)
-      for(let k=0; k<5; k++) {
+      for(let k=0; k<3; k++) { // Reduced count
           const angle = Math.random() * Math.PI * 2;
-          const r = Math.random() * 8; 
+          const r = Math.random() * 4; // Reduced spread
           particles.push({
               x: ball.x + Math.cos(angle) * r,
               y: ball.y + Math.sin(angle) * r,
-              vx: (Math.random() - 0.5) * 2,
-              vy: (Math.random() - 0.5) * 2 - 1,
+              vx: (Math.random() - 0.5) * 1, // Slower velocity
+              vy: (Math.random() - 0.5) * 1 - 0.5,
               life: 1.0,
-              size: Math.random() * 5 + 2
+              size: Math.random() * 3 + 1 // Smaller particles
           });
       }
 
@@ -160,16 +161,16 @@ const InteractiveBackground = () => {
         ctx.fill();
       }
 
-      // Render Fireball Core
-      const gradient = ctx.createRadialGradient(ball.x, ball.y, 2, ball.x, ball.y, 25);
+      // Render Fireball Core - SMALLER
+      const gradient = ctx.createRadialGradient(ball.x, ball.y, 1, ball.x, ball.y, 12);
       gradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
-      gradient.addColorStop(0.2, 'rgba(255, 215, 0, 0.6)');
-      gradient.addColorStop(0.5, 'rgba(255, 69, 0, 0.2)');
+      gradient.addColorStop(0.3, 'rgba(255, 215, 0, 0.6)');
+      gradient.addColorStop(0.6, 'rgba(255, 69, 0, 0.2)');
       gradient.addColorStop(1, 'transparent');
 
       ctx.fillStyle = gradient;
       ctx.beginPath();
-      ctx.arc(ball.x, ball.y, 30, 0, Math.PI * 2);
+      ctx.arc(ball.x, ball.y, 14, 0, Math.PI * 2); // Smaller radius (was 30)
       ctx.fill();
 
       requestAnimationFrame(animate);
@@ -217,10 +218,17 @@ const WelcomeScreen = ({ onEnter }: { onEnter: () => void }) => {
           </div>
         </div>
 
-        {/* Removed 3D effect, changed to Serif font */}
-        <h1 className="text-5xl md:text-7xl font-serif font-bold text-gold-500 mb-6 tracking-tight drop-shadow-sm">
+        {/* App Name */}
+        <h1 className="text-5xl md:text-7xl font-serif font-bold text-gold-500 mb-2 tracking-tight drop-shadow-sm">
           {APP_NAME}
         </h1>
+
+        {/* Founders Attribution - Moved Here, Bigger & Gold */}
+        <p className="text-lg md:text-2xl text-gold-400 font-serif italic mb-8 tracking-wide">
+          By Abu Aimal, Aimal Akram & Azad Studio
+        </p>
+
+        {/* Tagline */}
         <p className="text-gray-300 text-lg md:text-xl font-light mb-12 tracking-wide max-w-lg">
           {TAGLINE}
         </p>
@@ -234,10 +242,6 @@ const WelcomeScreen = ({ onEnter }: { onEnter: () => void }) => {
           </span>
           <div className="absolute inset-0 -translate-x-full group-hover:translate-x-0 bg-gradient-to-r from-transparent via-gold-600/20 to-transparent transition-transform duration-500" />
         </button>
-      </div>
-      
-      <div className="absolute bottom-8 text-center w-full text-gray-600 text-xs uppercase tracking-widest">
-        {ATTRIBUTION}
       </div>
     </div>
   );
@@ -1032,15 +1036,15 @@ export default function App() {
                  Breaking language barriers with AI-powered news translation and text-to-speech. Bringing you news in your language, anytime, anywhere.
                </p>
                <div className="flex gap-4 mt-4">
-                  <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center hover:border-gold-500 hover:text-gold-500 transition cursor-pointer">
-                    <span className="text-xs">IG</span>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center hover:border-gold-500 hover:text-gold-500 transition cursor-pointer">
+                  <a href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(getEnv('PRODUCTION_URL') || 'https://newspulseai.vercel.app')}`} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center hover:border-gold-500 hover:text-gold-500 transition cursor-pointer">
                     <span className="text-xs">X</span>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center hover:border-gold-500 hover:text-gold-500 transition cursor-pointer">
+                  </a>
+                  <a href={`https://t.me/share/url?url=${encodeURIComponent(getEnv('PRODUCTION_URL') || 'https://newspulseai.vercel.app')}`} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center hover:border-gold-500 hover:text-gold-500 transition cursor-pointer">
                     <span className="text-xs">TG</span>
-                  </div>
+                  </a>
+                  <a href={`https://wa.me/?text=${encodeURIComponent(getEnv('PRODUCTION_URL') || 'https://newspulseai.vercel.app')}`} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center hover:border-gold-500 hover:text-gold-500 transition cursor-pointer">
+                    <span className="text-xs">WA</span>
+                  </a>
                </div>
             </div>
 

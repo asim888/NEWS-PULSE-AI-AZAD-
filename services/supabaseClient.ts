@@ -1,10 +1,10 @@
 
 import { createClient } from '@supabase/supabase-js';
+import { getEnv } from '../utils/env';
 
 // Access environment variables securely
-// Note: In a real deployment, ensure these are set in your environment (e.g., .env or Vercel config)
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+const SUPABASE_URL = getEnv('SUPABASE_URL');
+const SUPABASE_ANON_KEY = getEnv('SUPABASE_ANON_KEY');
 
 // Create a single supabase client for interacting with your database
 export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY) 
