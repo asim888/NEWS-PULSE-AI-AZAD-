@@ -4,7 +4,7 @@ import { RSS_FEEDS } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 const CACHE_PREFIX = 'news_pulse_cache_';
-const CACHE_DURATION = 30 * 60 * 1000; 
+const CACHE_DURATION = 5 * 60 * 1000; // 5 Minutes for fast Breaking News
 
 const generateId = (str: string) => {
   let hash = 0;

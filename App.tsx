@@ -19,12 +19,6 @@ const IconClose = () => (
   </svg>
 );
 
-const IconPlay = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
-    <path fillRule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clipRule="evenodd" />
-  </svg>
-);
-
 const IconStop = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
     <path fillRule="evenodd" d="M4.5 7.5a3 3 0 013-3h9a3 3 0 013 3v9a3 3 0 01-3 3h-9a3 3 0 01-3-3v-9z" clipRule="evenodd" />
@@ -497,14 +491,51 @@ const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose, addToast 
       return contentMap[activeTab] || "";
   }
 
+  const stopAudio = () => {
+    if (audioSourceRef.current) {
+      audioSourceRef.current.stop();
+      audioSourceRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().then(() => {
+          audioContextRef.current = null;
+      });
+    }
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+    }
+    setPlaying(false);
+  };
+
+  const playDeviceFallback = (text: string) => {
+      if ('speechSynthesis' in window) {
+          stopAudio(); // Ensure clean state
+          
+          const lang = GeminiService.getDeviceVoiceLang(activeTab);
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = lang;
+          utterance.rate = 0.9;
+          // Clean text for device TTS as it often reads punctuation
+          utterance.text = text.replace(/[*#_]/g, '');
+
+          utterance.onend = () => setPlaying(false);
+          utterance.onerror = (e) => {
+              console.error("Device TTS Error", e);
+              setPlaying(false);
+              addToast("Audio Error", "Audio unavailable on this device.", "warning");
+          };
+          
+          window.speechSynthesis.speak(utterance);
+          setPlaying(true);
+      } else {
+          setPlaying(false);
+          addToast("Audio Error", "Browser does not support audio.", "warning");
+      }
+  };
+
   const handlePlayAudio = async () => {
     if (playing) {
-      if (audioSourceRef.current) {
-        audioSourceRef.current.stop();
-        audioSourceRef.current = null;
-      }
-      setPlaying(false);
-      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      stopAudio();
       return;
     }
 
@@ -515,22 +546,18 @@ const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose, addToast 
       setAudioLoading(false);
       // Fallback: Read the description if full content isn't ready
       if (article.description) {
-           const lang = GeminiService.getDeviceVoiceLang(activeTab);
-           const utterance = new SpeechSynthesisUtterance(article.description);
-           utterance.lang = lang;
-           window.speechSynthesis.speak(utterance);
-           setPlaying(true);
-           utterance.onend = () => setPlaying(false);
+           playDeviceFallback(article.description);
            return;
       }
-      alert("Please wait, content is generating...");
+      addToast("Please wait", "Content is generating...", "info");
       return;
     }
 
     try {
       const { audioData } = await GeminiService.generateNewsAudio(textToRead);
 
-      if (!audioContextRef.current) {
+      // Initialize Audio Context if needed
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       }
 
@@ -552,38 +579,17 @@ const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose, addToast 
       setPlaying(true);
 
     } catch (err) {
-      console.warn("Gemini Audio failed, falling back to Device TTS", err);
-      
-      if ('speechSynthesis' in window) {
-        const lang = GeminiService.getDeviceVoiceLang(activeTab);
-        const utterance = new SpeechSynthesisUtterance(textToRead);
-        utterance.lang = lang;
-        utterance.rate = 0.9;
-        utterance.text = textToRead.replace(/[*#_]/g, '');
-
-        utterance.onend = () => setPlaying(false);
-        utterance.onerror = () => {
-          setPlaying(false);
-          alert("Audio unavailable on this device.");
-        };
-        
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
-        setPlaying(true);
-      } else {
-        alert("Audio playback failed and your browser does not support text-to-speech.");
-      }
+      console.warn("Gemini Audio failed, switching to Device TTS", err);
+      // Seamless Fallback to Device TTS
+      playDeviceFallback(textToRead);
     } finally {
       setAudioLoading(false);
     }
   };
 
+  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      if (audioSourceRef.current) audioSourceRef.current.stop();
-      if (audioContextRef.current) audioContextRef.current.close();
-      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-    };
+    return () => stopAudio();
   }, []);
 
   const getFontClass = () => {
@@ -619,7 +625,10 @@ const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose, addToast 
               <div className="relative">
                 <select
                     value={activeTab}
-                    onChange={(e) => setActiveTab(e.target.value as any)}
+                    onChange={(e) => {
+                        setActiveTab(e.target.value as any);
+                        stopAudio(); // Stop audio when changing language
+                    }}
                     className="w-full bg-zinc-900 border border-zinc-700 text-white text-sm py-2 px-3 rounded-lg focus:ring-gold-500 focus:border-gold-500 block appearance-none cursor-pointer hover:border-gold-600/50 transition-colors"
                 >
                     <option value="original">English (Full Article)</option>

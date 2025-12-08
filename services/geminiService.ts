@@ -1,18 +1,13 @@
 import { GoogleGenAI, Type, Modality, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { EnhancedArticleContent } from "../types";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
-import { getEnv } from "../utils/env";
 
 let ai: GoogleGenAI | null = null;
 
 const getAI = () => {
   if (!ai) {
-    // Guideline: API key must be obtained exclusively from process.env.API_KEY
-    // Guideline: Assume it is pre-configured and accessible.
-    const key = process.env.API_KEY || getEnv('API_KEY');
-    if (key) {
-        ai = new GoogleGenAI({ apiKey: key });
-    }
+    // API Key must be obtained exclusively from process.env.API_KEY per guidelines
+    ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   }
   return ai;
 };
@@ -34,12 +29,10 @@ export const enhanceArticle = async (
   title: string,
   description: string
 ): Promise<EnhancedArticleContent> => {
-  // 1. Check Memory Cache (Fastest)
   if (articleMemoryCache.has(id)) {
     return articleMemoryCache.get(id)!;
   }
 
-  // 2. Check Supabase Cache (Fast)
   if (isSupabaseConfigured()) {
     try {
         const { data, error } = await supabase!
@@ -54,12 +47,9 @@ export const enhanceArticle = async (
             articleMemoryCache.set(id, content);
             return content;
         }
-    } catch (e) {
-        // Silent fail on cache miss
-    }
+    } catch (e) {}
   }
 
-  // 3. Generate with Gemini (Optimized Prompt)
   const prompt = `
     Context: News Aggregation.
     Source: "${title}" - "${description}"
@@ -92,8 +82,7 @@ export const enhanceArticle = async (
 
   try {
     const aiClient = getAI();
-    if (!aiClient) throw new Error("Gemini API Key missing");
-
+    
     const response = await aiClient.models.generateContent({
       model: "gemini-2.5-flash",
       contents: prompt,
@@ -130,12 +119,8 @@ export const enhanceArticle = async (
       console.error("Gemini Generation Error:", error);
   }
 
-  // 4. Handle Result
   if (content) {
-      // Success: Cache and Return
       articleMemoryCache.set(id, content);
-      
-      // Fire and forget cache update (don't await) to speed up UI return
       if (isSupabaseConfigured()) {
           supabase!.from('ai_articles_cache')
               .upsert({ article_id: id, data: content }, { onConflict: 'article_id' })
@@ -143,7 +128,6 @@ export const enhanceArticle = async (
       }
       return content;
   } else {
-      // Fallback
       return {
           fullArticle: description + "\n\n(Full article generation unavailable at this moment.)",
           summaryShort: description,
@@ -162,12 +146,10 @@ export const enhanceArticle = async (
 export const generateNewsAudio = async (text: string): Promise<{ audioData: string }> => {
   const cacheKey = btoa(unescape(encodeURIComponent(text.trim().slice(0, 100) + text.length))); 
 
-  // 1. Memory Cache
   if (audioMemoryCache.has(cacheKey)) {
     return { audioData: audioMemoryCache.get(cacheKey)! };
   }
 
-  // 2. Supabase Cache
   if (isSupabaseConfigured()) {
       try {
           const { data, error } = await supabase!
@@ -183,23 +165,23 @@ export const generateNewsAudio = async (text: string): Promise<{ audioData: stri
       } catch (e) {}
   }
 
+  // Remove Markdown, URLs, and Special Chars strictly for TTS
   const cleanText = text
-    .replace(/https?:\/\/\S+/g, '')
-    .replace(/[*#_`~>\[\]\(\)]/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/https?:\/\/\S+/g, '') // Remove URLs
+    .replace(/[*#_`~>\[\]\(\)]/g, '') // Remove Markdown
+    .replace(/\s+/g, ' ') // Clean spacing
     .trim();
 
   if (!cleanText) throw new Error("Audio generation failed: Empty text");
 
-  // Increased limit for full article reading
+  // Keep limit safe for preview model (4000 chars)
   const speechText = cleanText.slice(0, 4000);
   let base64Audio: string | null = null;
 
   try {
       const aiClient = getAI();
-      if (!aiClient) throw new Error("Gemini API Key missing");
-
-      // BLOCK_NONE is crucial for news content
+      
+      // Critical Safety Settings for News Content
       const safetySettings = [
           { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
           { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
