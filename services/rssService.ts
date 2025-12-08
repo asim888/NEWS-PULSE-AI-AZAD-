@@ -4,10 +4,8 @@ import { RSS_FEEDS } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 const CACHE_PREFIX = 'news_pulse_cache_';
-// Cache set to 30 mins for faster breaking news updates
 const CACHE_DURATION = 30 * 60 * 1000; 
 
-// Helper to generate a stable ID
 const generateId = (str: string) => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -65,8 +63,6 @@ export const addGalleryPost = async (post: { title: string, description: string,
 };
 
 export const fetchNewsForCategory = async (category: Category): Promise<Article[]> => {
-    
-    // --- SPECIAL CATEGORY: AZAD STUDIO (Strictly Supabase) ---
     if (category === Category.AZAD_STUDIO) {
         if (!isSupabaseConfigured()) {
             console.warn("[Azad Studio] Supabase URL or Key missing. Cannot fetch posts.");
@@ -75,12 +71,11 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
 
         try {
             console.log("[Azad Studio] Fetching posts from Supabase telegram_posts table...");
-            // Fetch directly from telegram_posts table using the configured client
             const { data, error } = await supabase!
                 .from('telegram_posts')
                 .select('*')
                 .order('created_at', { ascending: false })
-                .limit(50); // Increased limit to show more history
+                .limit(50);
             
             if (error) {
                 console.error("[Azad Studio] Supabase Query Error:", error.message);
@@ -90,9 +85,7 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
             if (data && data.length > 0) {
                 console.log(`[Azad Studio] Successfully fetched ${data.length} posts.`);
                 return data.map((post: any) => {
-                    // Create a title from the message content if available
                     const rawMsg = post.message || "";
-                    // Use first line or first 60 chars as title
                     const titleLine = rawMsg.split('\n')[0];
                     const title = titleLine.length > 60 
                         ? titleLine.substring(0, 60) + "..." 
@@ -105,11 +98,11 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
                         timestamp: post.created_at 
                             ? new Date(post.created_at).toLocaleDateString() + ' ' + new Date(post.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
                             : 'Just Now',
-                        description: rawMsg, // Full message as description
+                        description: rawMsg, 
                         category: Category.AZAD_STUDIO,
-                        url: '#', // No external link needed
+                        url: '#',
                         imageUrl: post.media_url,
-                        descriptionRomanUrdu: rawMsg // Usually Roman Urdu in Telegram
+                        descriptionRomanUrdu: rawMsg 
                     };
                 });
             } else {
@@ -126,12 +119,10 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
         return fetchGalleryPosts();
     }
 
-    // --- STANDARD RSS CATEGORIES ---
-
     let supabaseStaleData: Article[] = [];
     let localStaleData: Article[] = [];
 
-    // 1. GLOBAL CACHE (Supabase)
+    // 1. Supabase RSS Cache
     if (isSupabaseConfigured()) {
         try {
             const { data, error } = await supabase!
@@ -145,10 +136,8 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
                 const isFresh = (Date.now() - lastUpdate) < CACHE_DURATION;
                 
                 if (isFresh) {
-                    // Cache Hit (Fresh) - Return immediately
                     return data.articles;
                 } else {
-                    // Cache Hit (Stale) - Save for fallback
                     supabaseStaleData = data.articles;
                 }
             }
@@ -157,7 +146,7 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
         }
     }
 
-    // 2. Local Fallback Cache (LocalStorage)
+    // 2. Local Storage Cache
     const cacheKey = CACHE_PREFIX + category;
     const cachedData = localStorage.getItem(cacheKey);
     
@@ -165,16 +154,15 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
         try {
             const parsed = JSON.parse(cachedData);
             if (Date.now() - parsed.timestamp < CACHE_DURATION) {
-                // Local Fresh - Return immediately
                 return parsed.articles;
             }
-            localStaleData = parsed.articles; // Keep as stale fallback
+            localStaleData = parsed.articles;
         } catch (e) {
             console.error("Cache parse error", e);
         }
     }
 
-    // 3. Fetch from Live RSS via Proxy
+    // 3. Live Fetch
     const feedUrls = RSS_FEEDS[category];
     if (!feedUrls || feedUrls.length === 0) return [];
 
@@ -189,7 +177,7 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
         for (const proxy of proxies) {
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 8000); 
+                const timeoutId = setTimeout(() => controller.abort(), 6000); // Shorter timeout (6s)
 
                 const response = await fetch(proxy.url, { signal: controller.signal });
                 clearTimeout(timeoutId);
@@ -245,7 +233,7 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
                     };
                 });
             } catch (e) {
-               // Ignore and try next proxy
+               // Next proxy
             }
         }
         return [];
@@ -264,7 +252,6 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
         });
 
         if (uniqueArticles.length > 0) {
-            // Success! Update caches
             localStorage.setItem(cacheKey, JSON.stringify({
                 timestamp: Date.now(),
                 articles: uniqueArticles
@@ -288,18 +275,9 @@ export const fetchNewsForCategory = async (category: Category): Promise<Article[
         console.warn("RSS Network fetch failed", err);
     }
 
-    // 4. Fallback Strategy (Stale-While-Revalidate pattern)
-    // If network fails, return stale data instead of empty/error
-    
-    if (supabaseStaleData.length > 0) {
-        console.log(`[RSS] Returning Stale Supabase data for ${category}`);
-        return supabaseStaleData;
-    }
-
-    if (localStaleData.length > 0) {
-        console.log(`[RSS] Returning Stale LocalStorage data for ${category}`);
-        return localStaleData;
-    }
+    // 4. Fallback (Stale)
+    if (supabaseStaleData.length > 0) return supabaseStaleData;
+    if (localStaleData.length > 0) return localStaleData;
 
     return [];
 };

@@ -125,7 +125,7 @@ const InteractiveBackground = () => {
       ball.x += (mouse.x - ball.x) * 0.15;
       ball.y += (mouse.y - ball.y) * 0.15;
 
-      for(let k=0; k<2; k++) { // Less particles
+      for(let k=0; k<2; k++) { 
           const angle = Math.random() * Math.PI * 2;
           const r = Math.random() * 1; 
           particles.push({
@@ -134,7 +134,7 @@ const InteractiveBackground = () => {
               vx: (Math.random() - 0.5) * 0.5,
               vy: (Math.random() - 0.5) * 0.5 - 0.2,
               life: 1.0,
-              size: Math.random() * 1 + 0.5 // Smaller particles
+              size: Math.random() * 1 + 0.5 
           });
       }
 
@@ -160,7 +160,6 @@ const InteractiveBackground = () => {
         ctx.fill();
       }
 
-      // Smaller Core
       const gradient = ctx.createRadialGradient(ball.x, ball.y, 0.5, ball.x, ball.y, 3); 
       gradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
       gradient.addColorStop(0.3, 'rgba(255, 215, 0, 0.6)');
@@ -203,7 +202,6 @@ const WelcomeScreen = ({ onEnter }: { onEnter: () => void }) => {
         
         <div className="mb-10 relative group animate-fade-in">
           <div className="absolute inset-0 bg-gold-500 blur-2xl opacity-20 group-hover:opacity-40 transition-opacity duration-1000 rounded-full"></div>
-          {/* Made the gold circle thinner by reducing padding to p-1 and border width */}
           <div className="relative p-1 rounded-full bg-gradient-to-tr from-gold-700 via-gold-500 to-gold-700 shadow-2xl border border-gold-400">
              <div className="bg-noir-950 rounded-full p-6 border-2 border-noir-900">
                 <img src={LOGO_URL} alt="Logo" className="w-32 h-32 object-contain drop-shadow-xl" />
@@ -430,18 +428,20 @@ const Lightbox = ({ article, onClose }: { article: Article; onClose: () => void 
 interface ArticleModalProps {
   article: Article;
   onClose: () => void;
+  addToast: (title: string, message: string, type?: 'success' | 'info' | 'warning') => void;
 }
 
-const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose }) => {
-  const [loading, setLoading] = useState(true);
+const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose, addToast }) => {
+  const [loading, setLoading] = useState(false);
+  // OPTIMISTIC UI: Initialize with RSS data immediately so user sees something
   const [enhancedContent, setEnhancedContent] = useState<EnhancedArticleContent | null>({
-    fullArticle: article.content || '',
-    summaryShort: article.summaryShort || '',
+    fullArticle: article.content || article.description || '',
+    summaryShort: article.summaryShort || article.description || '',
     summaryRomanUrdu: article.descriptionRomanUrdu || '',
     summaryUrdu: article.descriptionUrdu || '',
     summaryHindi: article.descriptionHindi || '',
     summaryTelugu: article.descriptionTelugu || '',
-    fullArticleRomanUrdu: '',
+    fullArticleRomanUrdu: article.descriptionRomanUrdu || '',
     fullArticleUrdu: '',
     fullArticleHindi: '',
     fullArticleTelugu: '',
@@ -454,14 +454,15 @@ const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose }) => {
   const [audioLoading, setAudioLoading] = useState(false);
 
   useEffect(() => {
+    // Background fetch for enhanced content (full article + translations)
     const fetchContent = async () => {
       setLoading(true);
       try {
         const data = await GeminiService.enhanceArticle(article.id, article.title, article.description);
         setEnhancedContent(data);
+        if(data) setLoading(false);
       } catch (e) {
         console.error("Failed to enhance", e);
-      } finally {
         setLoading(false);
       }
     };
@@ -469,6 +470,7 @@ const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose }) => {
   }, [article]);
 
   const getContent = () => {
+      // Fallback logic for display
       if (activeTab === 'roman') {
           const summary = enhancedContent?.summaryRomanUrdu || article.descriptionRomanUrdu || "";
           const full = enhancedContent?.fullArticleRomanUrdu || "";
@@ -481,15 +483,15 @@ const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose }) => {
              content += `**Tafseeli Khabar (Full Story)**\n${full}`;
              return content;
           }
-          return summary;
+          return summary || "Generating Roman Urdu translation...";
       }
 
       const contentMap: Record<string, string> = {
           'original': enhancedContent?.fullArticle || article.content || article.description || "",
           'summary': enhancedContent?.summaryShort || article.summaryShort || "Summarizing...",
-          'urdu': enhancedContent?.fullArticleUrdu || enhancedContent?.summaryUrdu || article.descriptionUrdu || "",
-          'hindi': enhancedContent?.fullArticleHindi || enhancedContent?.summaryHindi || article.descriptionHindi || "",
-          'telugu': enhancedContent?.fullArticleTelugu || enhancedContent?.summaryTelugu || article.descriptionTelugu || "",
+          'urdu': enhancedContent?.fullArticleUrdu || enhancedContent?.summaryUrdu || article.descriptionUrdu || "Urdu translation generating...",
+          'hindi': enhancedContent?.fullArticleHindi || enhancedContent?.summaryHindi || article.descriptionHindi || "Hindi translation generating...",
+          'telugu': enhancedContent?.fullArticleTelugu || enhancedContent?.summaryTelugu || article.descriptionTelugu || "Telugu translation generating...",
       };
       
       return contentMap[activeTab] || "";
@@ -509,9 +511,19 @@ const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose }) => {
     setAudioLoading(true);
     const textToRead = getContent();
 
-    if (!textToRead) {
+    if (!textToRead || textToRead.includes("generating...")) {
       setAudioLoading(false);
-      alert(loading ? "Please wait, content is generating..." : "No text available.");
+      // Fallback: Read the description if full content isn't ready
+      if (article.description) {
+           const lang = GeminiService.getDeviceVoiceLang(activeTab);
+           const utterance = new SpeechSynthesisUtterance(article.description);
+           utterance.lang = lang;
+           window.speechSynthesis.speak(utterance);
+           setPlaying(true);
+           utterance.onend = () => setPlaying(false);
+           return;
+      }
+      alert("Please wait, content is generating...");
       return;
     }
 
@@ -624,22 +636,23 @@ const ArticleModal: React.FC<ArticleModalProps> = ({ article, onClose }) => {
            </div>
 
            <div className="prose prose-invert prose-amber max-w-none min-h-[200px]">
-             {loading && !getContent() ? (
-               <div className="space-y-3 animate-pulse">
-                 <div className="h-4 bg-zinc-800 rounded w-3/4"></div>
-                 <div className="h-4 bg-zinc-800 rounded w-full"></div>
-                 <div className="h-4 bg-zinc-800 rounded w-5/6"></div>
-                 <p className="text-center text-xs text-gold-600 mt-4">
-                    {activeTab === 'roman' 
-                      ? "Tarjuma ho raha hai... (Translating to Roman Urdu...)" 
-                      : "AI Journalist is translating full article..."}
-                 </p>
-               </div>
-             ) : (
-               <div className={`text-gray-300 ${getFontClass()} whitespace-pre-line`}>
+               {/* OPTIMISTIC UI: Show content immediately. If loading, show a subtle indicator overlay instead of blocking content */}
+               <div className={`text-gray-300 ${getFontClass()} whitespace-pre-line relative`}>
                  {getContent()}
+                 {loading && (
+                     <div className="absolute top-0 right-0 p-2">
+                         <span className="flex h-3 w-3 relative">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gold-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-gold-500"></span>
+                        </span>
+                     </div>
+                 )}
                </div>
-             )}
+               {loading && activeTab !== 'original' && !getContent().includes(enhancedContent?.fullArticle || '') && (
+                   <p className="text-xs text-gold-500/70 mt-4 italic animate-pulse">
+                       AI Journalist is expanding and translating full story in background...
+                   </p>
+               )}
            </div>
         </div>
 
@@ -928,8 +941,6 @@ export default function App() {
                     <h2 className="text-gold-500 text-sm font-bold uppercase tracking-widest">Azad Studio Live</h2>
                  </div>
                </div>
-
-               {/* Removed the Telegram iframe here to prevent connection refusal */}
                
                <div className="pt-8 border-t border-zinc-800">
                   <div className="flex items-center justify-between mb-6">
@@ -1241,6 +1252,7 @@ export default function App() {
         <ArticleModal 
           article={selectedArticle}
           onClose={() => setSelectedArticle(null)}
+          addToast={addToast}
         />
       )}
       

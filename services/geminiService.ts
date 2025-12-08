@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, Modality, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { EnhancedArticleContent } from "../types";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
@@ -8,15 +7,15 @@ let ai: GoogleGenAI | null = null;
 
 const getAI = () => {
   if (!ai) {
-    const key = getEnv('API_KEY');
+    // Guideline: API key must be obtained exclusively from process.env.API_KEY
+    // Guideline: Assume it is pre-configured and accessible.
+    const key = process.env.API_KEY || getEnv('API_KEY');
     if (key) {
         ai = new GoogleGenAI({ apiKey: key });
     }
   }
   return ai;
 };
-
-const getOpenAIKey = () => getEnv('OPENAI_API_KEY');
 
 const articleMemoryCache = new Map<string, EnhancedArticleContent>();
 const audioMemoryCache = new Map<string, string>();
@@ -30,87 +29,17 @@ export const getDeviceVoiceLang = (tab: string): string => {
     }
 };
 
-// --- OPENAI HELPER FUNCTIONS ---
-
-const generateWithOpenAI = async (prompt: string): Promise<EnhancedArticleContent> => {
-    const apiKey = getOpenAIKey();
-    if (!apiKey) throw new Error("OpenAI API Key missing");
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-            model: "gpt-4o-mini", // Cost effective and fast
-            messages: [
-                {
-                    role: "system", 
-                    content: "You are a senior journalist. Output strictly in valid JSON format." 
-                },
-                { role: "user", content: prompt }
-            ],
-            response_format: { type: "json_object" }
-        })
-    });
-
-    if (!response.ok) {
-        throw new Error(`OpenAI Chat Error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices[0].message.content;
-    return JSON.parse(content) as EnhancedArticleContent;
-};
-
-const generateAudioWithOpenAI = async (text: string): Promise<string> => {
-    const apiKey = getOpenAIKey();
-    if (!apiKey) throw new Error("OpenAI API Key missing");
-
-    const response = await fetch("https://api.openai.com/v1/audio/speech", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-            model: "tts-1",
-            input: text,
-            voice: "alloy", // Neutral, clear voice
-            response_format: "mp3"
-        })
-    });
-
-    if (!response.ok) {
-        throw new Error(`OpenAI TTS Error: ${response.status}`);
-    }
-
-    const blob = await response.blob();
-    const arrayBuffer = await blob.arrayBuffer();
-    // Convert ArrayBuffer to Base64
-    let binary = '';
-    const bytes = new Uint8Array(arrayBuffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return window.btoa(binary);
-};
-
-// --- MAIN EXPORTS ---
-
 export const enhanceArticle = async (
   id: string,
   title: string,
   description: string
 ): Promise<EnhancedArticleContent> => {
-  // 1. Check Memory Cache
+  // 1. Check Memory Cache (Fastest)
   if (articleMemoryCache.has(id)) {
     return articleMemoryCache.get(id)!;
   }
 
-  // 2. Check Supabase Cache (Save Once, Use Forever)
+  // 2. Check Supabase Cache (Fast)
   if (isSupabaseConfigured()) {
     try {
         const { data, error } = await supabase!
@@ -120,7 +49,7 @@ export const enhanceArticle = async (
             .single();
         
         if (data && !error) {
-            console.log("[GeminiService] Article Cache Hit from Supabase");
+            console.log("[GeminiService] Article Cache Hit");
             const content = data.data as EnhancedArticleContent;
             articleMemoryCache.set(id, content);
             return content;
@@ -130,21 +59,21 @@ export const enhanceArticle = async (
     }
   }
 
+  // 3. Generate with Gemini (Optimized Prompt)
   const prompt = `
-    Based on the following news headline and snippet, write a comprehensive news update.
+    Context: News Aggregation.
+    Source: "${title}" - "${description}"
     
-    Headline: "${title}"
-    Snippet: "${description}"
+    Task:
+    1. WRITE A FULL ARTICLE (300-400 words): Expansive, professional, journalist style. Include context and potential impact.
+    2. SUMMARIZE (50 words): Key facts only.
+    3. TRANSLATE the *Full Article* into:
+       - Roman Urdu (Urdu in English script)
+       - Urdu (Nastaliq script)
+       - Hindi (Devanagari)
+       - Telugu (Telugu script)
     
-    Your Tasks (Must provide all):
-    1. Expand this into a full article (approx 250 words). Be objective, professional, and journalistic (English).
-    2. Write a short summary (max 50 words) in English.
-    3. Translate the *Full Article* (from step 1) into Roman Urdu (Urdu language written in English script).
-    4. Translate the *Full Article* (from step 1) into Urdu (proper Urdu script/Nastaliq).
-    5. Translate the *Full Article* (from step 1) into Hindi (Devanagari script).
-    6. Translate the *Full Article* (from step 1) into Telugu (Telugu script).
-    
-    Output strictly in JSON format matching this schema:
+    Output strictly valid JSON:
     {
       "fullArticle": "string",
       "summaryShort": "string",
@@ -161,7 +90,6 @@ export const enhanceArticle = async (
 
   let content: EnhancedArticleContent | null = null;
 
-  // 3. Try Gemini API
   try {
     const aiClient = getAI();
     if (!aiClient) throw new Error("Gemini API Key missing");
@@ -198,22 +126,16 @@ export const enhanceArticle = async (
     if (text) {
         content = JSON.parse(text) as EnhancedArticleContent;
     }
-  } catch (geminiError) {
-      console.warn("Gemini Generation Failed, trying OpenAI...", geminiError);
-      
-      // 4. Fallback to OpenAI API
-      try {
-          content = await generateWithOpenAI(prompt);
-      } catch (openAiError) {
-          console.error("OpenAI Generation Failed", openAiError);
-      }
+  } catch (error) {
+      console.error("Gemini Generation Error:", error);
   }
 
-  // 5. Handle Success or Complete Failure
+  // 4. Handle Result
   if (content) {
       // Success: Cache and Return
       articleMemoryCache.set(id, content);
-
+      
+      // Fire and forget cache update (don't await) to speed up UI return
       if (isSupabaseConfigured()) {
           supabase!.from('ai_articles_cache')
               .upsert({ article_id: id, data: content }, { onConflict: 'article_id' })
@@ -221,14 +143,14 @@ export const enhanceArticle = async (
       }
       return content;
   } else {
-      // Failure: Return Local Fallback
+      // Fallback
       return {
-          fullArticle: description + "\n\n(AI Expansion currently unavailable. Please check back later.)",
+          fullArticle: description + "\n\n(Full article generation unavailable at this moment.)",
           summaryShort: description,
-          summaryRomanUrdu: "Maaf kijiye, abhi tarjuma dastiyab nahi hai.",
-          summaryUrdu: "معاف کیجئے، ابھی ترجمہ دستیاب نہیں ہے۔",
-          summaryHindi: "क्षमा करें, अनुवाद अभी उपलब्ध नहीं है।",
-          summaryTelugu: "క్షమించండి, అనువాదం ప్రస్తుతం అందుబాటులో లేదు.",
+          summaryRomanUrdu: "Tarjuma dastiyab nahi hai.",
+          summaryUrdu: "ترجمہ دستیاب نہیں ہے۔",
+          summaryHindi: "अनुवाद उपलब्ध नहीं है।",
+          summaryTelugu: "అనువాదం అందుబాటులో లేదు.",
           fullArticleRomanUrdu: description,
           fullArticleUrdu: description,
           fullArticleHindi: description,
@@ -240,12 +162,12 @@ export const enhanceArticle = async (
 export const generateNewsAudio = async (text: string): Promise<{ audioData: string }> => {
   const cacheKey = btoa(unescape(encodeURIComponent(text.trim().slice(0, 100) + text.length))); 
 
-  // 1. Check Memory Cache
+  // 1. Memory Cache
   if (audioMemoryCache.has(cacheKey)) {
     return { audioData: audioMemoryCache.get(cacheKey)! };
   }
 
-  // 2. Check Supabase Cache (Save Once, Use Forever)
+  // 2. Supabase Cache
   if (isSupabaseConfigured()) {
       try {
           const { data, error } = await supabase!
@@ -255,35 +177,29 @@ export const generateNewsAudio = async (text: string): Promise<{ audioData: stri
               .single();
           
           if (data && !error) {
-              console.log("[GeminiService] Audio Cache Hit from Supabase");
               audioMemoryCache.set(cacheKey, data.audio_data);
               return { audioData: data.audio_data };
           }
       } catch (e) {}
   }
 
-  // Sanitize text: Remove URLs, markdown chars, and extra whitespace.
   const cleanText = text
     .replace(/https?:\/\/\S+/g, '')
     .replace(/[*#_`~>\[\]\(\)]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (!cleanText) {
-      throw new Error("Audio generation failed: Text was empty after sanitization.");
-  }
+  if (!cleanText) throw new Error("Audio generation failed: Empty text");
 
-  // Cap at 2000 chars to avoid model limits while keeping most context
-  const speechText = cleanText.slice(0, 2000);
+  // Increased limit for full article reading
+  const speechText = cleanText.slice(0, 4000);
   let base64Audio: string | null = null;
 
-  // 3. Try Gemini TTS
   try {
       const aiClient = getAI();
       if (!aiClient) throw new Error("Gemini API Key missing");
 
-      // Use strictly defined safety settings to prevent "finishReason: OTHER" 
-      // which happens when news content triggers default safety filters.
+      // BLOCK_NONE is crucial for news content
       const safetySettings = [
           { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
           { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -293,14 +209,12 @@ export const generateNewsAudio = async (text: string): Promise<{ audioData: stri
 
       const response = await aiClient.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
-        contents: [{
-            parts: [{ text: speechText }]
-        }],
+        contents: [{ parts: [{ text: speechText }] }],
         config: {
             responseModalities: [Modality.AUDIO], 
             speechConfig: {
                 voiceConfig: {
-                    prebuiltVoiceConfig: { voiceName: 'Kore' }
+                    prebuiltVoiceConfig: { voiceName: 'Fenrir' } // Deeper news voice
                 }
             },
             safetySettings: safetySettings
@@ -308,35 +222,19 @@ export const generateNewsAudio = async (text: string): Promise<{ audioData: stri
       });
       
       base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
-
-      if (!base64Audio && response.candidates?.[0]?.finishReason) {
-         console.warn(`Gemini TTS Finish Reason: ${response.candidates[0].finishReason}`);
-      }
-
-  } catch (geminiError) {
-      console.warn("Gemini TTS Failed, trying OpenAI...", geminiError);
-
-      // 4. Try OpenAI TTS
-      try {
-          base64Audio = await generateAudioWithOpenAI(speechText);
-      } catch (openAiError) {
-          console.error("OpenAI TTS Failed", openAiError);
-      }
+  } catch (error) {
+      console.warn("Gemini TTS Failed", error);
   }
 
-  // 5. Handle Result
   if (base64Audio) {
       audioMemoryCache.set(cacheKey, base64Audio);
-
       if (isSupabaseConfigured()) {
           supabase!.from('ai_audio_cache')
               .upsert({ text_hash: cacheKey, audio_data: base64Audio }, { onConflict: 'text_hash' })
               .then(() => {});
       }
-
       return { audioData: base64Audio };
   } else {
-      // 6. Complete Failure -> Throw Error (App.tsx triggers Device TTS)
-      throw new Error("Both AI TTS services failed.");
+      throw new Error("TTS generation failed.");
   }
 };
