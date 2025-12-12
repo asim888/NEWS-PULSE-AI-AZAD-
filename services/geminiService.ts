@@ -76,7 +76,7 @@ export const enhanceArticle = async (
     Task: News Enhancement.
     Source: "${title}" - "${description}"
     
-    1. WRITE A FULL ARTICLE (300-400 words): Professional journalist style.
+    1. WRITE A FULL ARTICLE (400-500 words): Professional journalist style.
     2. SUMMARIZE (50 words): Key facts.
     3. TRANSLATE the *Full Article* into:
        - Roman Urdu
